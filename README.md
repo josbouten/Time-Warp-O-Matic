@@ -9,4 +9,6 @@ If you are interested to read some more about this project, have a look at this 
 
 https://lookmumnocomputer.discourse.group/t/sculpt-o-sound-presents-time-warp-o-matic/2807
 
-If you want to see time being warped, have a look at this: https://www.youtube.com/watch?v=0I7mG5jqZBk
+If you want to see time being warped, have a look at this: 
+
+https://www.youtube.com/watch?v=0I7mG5jqZBk
