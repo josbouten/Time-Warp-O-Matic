@@ -2,6 +2,10 @@
 
  This code is based on the V1.0 firmware for the Time Manipulator guitar pedal
  more info at www.electrosmash.com but has undergone quite a few alterations.
+
+ 20. April 2021, v0.2
+ - writing settings to eeprom will now happen 10 seconds after the rotary encoder is moved last
+   in stead of with every step of the rotary encoder.
  
  29. Dec 2020, v0.1
  - adapted to usage of module from aliexpress called:
@@ -67,7 +71,7 @@
 
 #include <OneButton.h>
 
-const String pgm_version = "v0.1";
+const String pgm_version = "v0.2";
 
 #define ON true
 #define OFF false
@@ -147,8 +151,6 @@ Rotary rotary = Rotary(pinA, pinB);
 static byte ENC_PUSH = A1;
 
 // All interrupt vars are volatile in order to force the C++ optimiser to leave them alone.
-volatile byte aFlag = 0;      // Let's us know when we're expecting a rising edge on pinA to signal that the encoder has arrived at a detent.
-volatile byte bFlag = 0;      // Let's us know when we're expecting a rising edge on pinB to signal that the encoder has arrived at a detent (opposite direction to when aFlag is set).
 volatile byte counter[NR_OF_EFFECTS]; // This variable stores the current value of the encoder position for each effect. Change to int or uin16_t instead of byte if you want to record a larger range than 0-255.
 volatile byte counter_max[NR_OF_EFFECTS];
 volatile byte old_counter[NR_OF_EFFECTS];// Stores the last encoder position value so we can compare to the current reading and see if it has changed (so we know when to print to the serial monitor).
@@ -237,7 +239,6 @@ byte effect_status = HIGH;
 int psycho_counter = 0;
 int chorus_counter = 130;
 
-
 // Screen saver related stuff.
 // stensTimer for 'screensaver'.
 StensTimer* stensTimer;
@@ -249,9 +250,13 @@ Timer *screensaverTimer;
 #define SCREENSAVER_TIMER_ACTION 2
 
 // Choose some timeouts and number of repetitions.
-#define SCREEN_TIMEOUT 300000L       // Screen saver timeout in milli seconds (HL: 5 minutes).
-#define SCREENSAVER_TIMEOUT 60000L   // Every minute a time warp will be visible on the display.
-#define SCREENSAVER_REPETITION 86400 // Repeat for one whole day should suffice.
+#define SCREEN_TIMEOUT 3000000L       // Screen saver timeout in milli seconds (HL: 50 minutes).
+#define SCREENSAVER_TIMEOUT 60000L    // Every minute a time warp will be visible on the display.
+#define SCREENSAVER_REPETITION 86400  // Repeat for one whole day should suffice.
+
+bool writeToEeprom = false;
+unsigned long writeTimer = millis();
+#define DELAY_TIME_BEFORE_WRITING_TO_EEPROM_IN_MS 10000 // Time in milli seconds.
 
 // Interrupt Service Routines
 //
@@ -268,7 +273,7 @@ void rotate(void) {
         effect = NR_OF_EFFECTS - 1; // Wrap around.
       }
     } else {
-        counter[effect] += count_direction; // De/Increment the effect's speed or delay parameter
+        counter[effect] += count_direction; // De/Increment the effect's speed or delay parameter.
         if (counter[effect] < 1) { 
           counter[effect] = 1;
         } else {
@@ -285,7 +290,7 @@ void rotate(void) {
         effect = 0; // Wrap around.
       }
     } else {
-        counter[effect] += -count_direction; // De/Increment the effect's speed or delay parameter
+        counter[effect] += -count_direction; // De/Increment the effect's speed or delay parameter.
         if (counter[effect] < 1) { 
           counter[effect] = 1;
         } else {      
@@ -423,13 +428,24 @@ void toggleLed13(void) {
   digitalWrite(13, m);
 }
 
-void updateSettingsInEeprom(void) {
-  EEPROM.update(EFFECT, effect);
-  for (int i = 0; i < NR_OF_EFFECTS; i++) {
-    EEPROM.update(COUNTER + i, counter[i]);
+void updateEepromTimer(void) {
+  writeToEeprom = true;
+  writeTimer = millis() + DELAY_TIME_BEFORE_WRITING_TO_EEPROM_IN_MS;
+}
+
+void writeSettingsToEeprom(void) {
+  if ((writeToEeprom == true) and (millis() > writeTimer)) { 
+    writeToEeprom = false;
+    Serial.println("Writing settings to EEPROM.");
+    EEPROM.update(EFFECT, effect);
+    for (int i = 0; i < NR_OF_EFFECTS; i++) {
+      EEPROM.update(COUNTER + i, counter[i]);
+    }
+    EEPROM.update(NO_DRY_SIGNAL, no_dry_signal);
+    toggleLed13();  
+    delay(100);
+    toggleLed13();  
   }
-  EEPROM.update(NO_DRY_SIGNAL, no_dry_signal);
-  toggleLed13();
 }
 
 void readSettingsFromEeprom(void) {
@@ -603,7 +619,7 @@ void cls(Timer* timer){
 
 void setup() {
   // Set serial device, only for debug purposes
-  Serial.begin(57600);
+  Serial.begin(115200);
   setupDisplay();
   // Set the pins  
   pinMode(DELAY1,   OUTPUT);
@@ -757,7 +773,7 @@ void loop() {
        loopb = true;   
        setSwitches(HIGH, LOW, !digitalRead(PEDAL_SWITCH), HIGH);       
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
        }
        if (direction_up == 1) {
          if (chorus_counter > CHORUS_UPPER_LIMIT) {
@@ -766,7 +782,7 @@ void loop() {
          }
          // Delay created by millis();
          delay_currentMillis = millis();
-         if (delay_currentMillis - delay_previousMillis > (MIN_TIME + counter[CHORUS] >> 1)) {
+         if ((delay_currentMillis - delay_previousMillis) > (MIN_TIME + (counter[CHORUS] >> 1))) {
            delay_previousMillis = delay_currentMillis;
            chorus_counter += delta; // If too fast try divider.
          }           
@@ -777,7 +793,7 @@ void loop() {
            }
            // Delay created by millis();
            delay_currentMillis = millis();
-           if (delay_currentMillis - delay_previousMillis > (MIN_TIME + counter[CHORUS] >> 1)) {
+           if ((delay_currentMillis - delay_previousMillis) > (MIN_TIME + (counter[CHORUS] >> 1))) {
              delay_previousMillis = delay_currentMillis;
              chorus_counter -= delta; // If too fast try divider.
            }
@@ -793,7 +809,7 @@ void loop() {
        count_direction = RIGHT;
        loopb = true;
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
          setSwitches(LOW, LOW, LOW, LOW);
        }
        if (digitalRead(PEDAL_SWITCH) == HIGH) {
@@ -814,7 +830,7 @@ void loop() {
        if ((digitalRead(PEDAL_SWITCH) == LOW) && (DECELERATOR_counter >= DECELERATOR_counter_min)) {  
          // The lines below introduce a delay, so the delay time (DECELERATOR_counter) is not reduced too fast.  
          delay_currentMillis = millis();
-         if (delay_currentMillis - delay_previousMillis >= counter[DECELERATOR]) {
+         if ((delay_currentMillis - delay_previousMillis) >= counter[DECELERATOR]) {
            delay_previousMillis = delay_currentMillis;
            DECELERATOR_counter--;
          }
@@ -832,7 +848,7 @@ void loop() {
        loopb = false;
        setSwitches(HIGH, LOW, no_dry_signal, LOW);
        setDelays(counter[SHORT_DELAY1], counter[SHORT_DELAY1]);
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = RIGHT;
      break; 
 
@@ -845,7 +861,7 @@ void loop() {
          loopb = false;
          setSwitches(LOW, LOW, no_dry_signal, HIGH);
          setDelays(counter[SHORT_DELAY2], counter[SHORT_DELAY2]);
-         updateSettingsInEeprom();
+         updateEepromTimer();
          count_direction = RIGHT;
        break; 
      #endif
@@ -856,7 +872,7 @@ void loop() {
        // Do not include the tap 1 signal directly in the output.
        setSwitches(LOW, HIGH, no_dry_signal, LOW);
        setDelays(counter[DELAY], counter[DELAY]);
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = RIGHT;
      break; 
   
@@ -866,7 +882,7 @@ void loop() {
        // Feed forward the dry signal to the 2nd tap.
        setSwitches(LOW, HIGH, no_dry_signal, HIGH);
        setDelays(counter[ECHO1], counter[ECHO1]);
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = RIGHT;
      break; 
 
@@ -876,7 +892,7 @@ void loop() {
        // Do not feed forward the dry signal to the 2nd tap.
        setSwitches(HIGH, HIGH, no_dry_signal, LOW);
        setDelays(counter[ECHO2], counter[ECHO2]);
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = RIGHT;
      break;        
 
@@ -886,7 +902,7 @@ void loop() {
        // Include the 'middle tap' signal directly in the output as well.
        setSwitches(HIGH, HIGH, no_dry_signal, HIGH);
        setDelays(counter[ECHO3], counter[ECHO3]);
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = RIGHT;
      break; 
          
@@ -895,7 +911,7 @@ void loop() {
        loopb = false;
        setSwitches(HIGH, LOW, no_dry_signal, HIGH);
        setDelays(MAX_COUNTER, MAX_COUNTER - (counter[REVERB] >> 1)); // One delay is 1/2 the other.
-       updateSettingsInEeprom();
+       updateEepromTimer();
        count_direction = LEFT;
        break; 
   
@@ -905,7 +921,7 @@ void loop() {
        //setSwitches(LOW, LOW, !digitalRead(PEDAL_SWITCH), LOW); // original
        setSwitches(!digitalRead(PEDAL_SWITCH), LOW, HIGH, LOW);
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
        }    
        count_direction = LEFT;
      break; 
@@ -917,7 +933,7 @@ void loop() {
        setSwitches(td, LOW, td, td);
        setDelays(220, 220 - (counter[REVERB] >> 1));       
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
        }    
        count_direction = LEFT;
      break; 
@@ -926,7 +942,7 @@ void loop() {
        if ((select_mode == true) and (screen_saver == OFF)) displayText("WowNotFlut", MAX_FX_NAME_LEN, 0, 0, CLEAR_LINE);
        loopb = true;  
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
          setSwitches(HIGH, LOW, LOW, LOW);
          delta = random(1, 11);
          delta_speed = random(100, 401) / 100.0; 
@@ -960,7 +976,7 @@ void loop() {
        loopb = true;
        setSwitches(HIGH, HIGH, no_dry_signal, HIGH);       
        if (effect != old_effect) {
-         updateSettingsInEeprom();
+         updateEepromTimer();
        }
        if (direction_up == 1) {
          psycho_counter++; // If too fast try divider. 
@@ -1038,4 +1054,5 @@ void loop() {
   }
   button.tick();
   stensTimer->run();
+  writeSettingsToEeprom();
 }
