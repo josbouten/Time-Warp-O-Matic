@@ -3,6 +3,11 @@
  This code is based on the V1.0 firmware for the Time Manipulator guitar pedal
  more info at www.electrosmash.com but has undergone quite a few alterations.
 
+ 3. March 2022 v0.2.1
+ - For some reason I had created a StensTimerJSB.h file which did not differ significantly from the
+   original StensTimer.h, but made it impossible for user moly_wan to compile the code.
+   Therefore I put the old one back.
+
  20. April 2021, v0.2
  - writing settings to eeprom will now happen 10 seconds after the rotary encoder is moved last
    in stead of with every step of the rotary encoder.
@@ -63,7 +68,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <StensTimerJSB.h>
+#include <StensTimer.h>
 
 //#define DEBUG 
 // Use this and the jumper on the pcb/vero board to debug the hardware.
